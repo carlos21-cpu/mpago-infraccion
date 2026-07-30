@@ -2,11 +2,17 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import Mercadopago from "mercadopago";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+// Inicializar SDK de Mercado Pago
+const mp = new Mercadopago({
+    access_token: process.env.MP_ACCESS_TOKEN,
+});
 
 // CORS: por ahora abierto para pruebas; luego limita a tu dominio de frontend
 app.use(
@@ -20,7 +26,7 @@ app.use(express.json());
 
 // Ruta de prueba para saber si el backend está vivo
 app.get("/", (_req, res) => {
-    res.json({ ok: true, message: "Backend Clip funcionando" });
+    res.json({ ok: true, message: "Backend funcionando" });
 });
 
 // Construir header de autenticación Basic a partir de API Key + Secret
@@ -38,7 +44,7 @@ function getClipAuthHeader() {
     return `Basic ${base64}`;
 }
 
-// Ruta para crear el enlace de Checkout Redireccionado
+// Ruta para crear el enlace de Checkout Redireccionado (Clip)
 app.post("/api/clip/create-checkout", async(req, res) => {
     try {
         const { amount, placa, folio, estado, description } = req.body;
@@ -67,11 +73,10 @@ app.post("/api/clip/create-checkout", async(req, res) => {
             currency: "MXN",
             purchase_description: description || `Pago control vehicular ${placa} - folio ${folio}`,
             redirection_url: {
-                success: `https://tu-dominio.com/pago-exitoso?placa=${placa}&folio=${folio}`,
-                error: `https://tu-dominio.com/pago-error?placa=${placa}&folio=${folio}`,
-                default: `https://tu-dominio.com/pago-default`,
+                success: `${process.env.FRONTEND_URL}/pago-exitoso?placa=${placa}&folio=${folio}`,
+                error: `${process.env.FRONTEND_URL}/pago-error?placa=${placa}&folio=${folio}`,
+                default: `${process.env.FRONTEND_URL}`,
             },
-            // agrega aquí cualquier otro campo que la doc de Clip pida para v2/checkout
         };
 
         const clipRes = await fetch(`${clipBaseUrl}/v2/checkout`, {
@@ -122,6 +127,73 @@ app.post("/api/clip/create-checkout", async(req, res) => {
             success: false,
             error: "Error interno al crear el enlace de pago.",
         });
+    }
+});
+
+// Ruta para crear preferencia de pago (Mercado Pago)
+app.post("/api/mercadopago/create-preference", async(req, res) => {
+    try {
+        const { amount, placa, folio, description } = req.body;
+
+        if (!amount || !placa) {
+            return res.status(400).json({
+                success: false,
+                error: "Datos incompletos (amount, placa requeridos).",
+            });
+        }
+
+        const preference = {
+            items: [{
+                title: description || `Pago de infracciones - Placa ${placa}`,
+                unit_price: Number(amount),
+                quantity: 1,
+                currency_id: "MXN",
+            }, ],
+            back_urls: {
+                success: `${process.env.FRONTEND_URL}/pago-exitoso?placa=${placa}&folio=${folio}`,
+                failure: `${process.env.FRONTEND_URL}/pago-error?placa=${placa}&folio=${folio}`,
+                pending: `${process.env.FRONTEND_URL}/pago-pendiente?placa=${placa}&folio=${folio}`,
+            },
+            auto_return: "approved",
+            external_reference: folio || `F-${Date.now()}`,
+            notification_url: `${process.env.BACKEND_URL}/api/mercadopago/webhook`,
+        };
+
+        const response = await mp.preferences.create(preference);
+
+        return res.json({
+            success: true,
+            checkout_url: response.body.init_point,
+            preference_id: response.body.id,
+        });
+    } catch (error) {
+        console.error("Error creando preferencia MP:", error);
+        res.status(500).json({
+            success: false,
+            error: error.message || "Error al crear preferencia de pago",
+        });
+    }
+});
+
+// Webhook de Mercado Pago para recibir notificaciones de pago
+app.post("/api/mercadopago/webhook", async(req, res) => {
+    try {
+        const { action, data } = req.body;
+
+        if (action === "payment.created" || action === "payment.updated") {
+            const paymentId = data.id;
+            const payment = await mp.payments.get(paymentId);
+
+            if (payment.body.status === "approved") {
+                console.log("Pago aprobado en MP:", payment.body.external_reference);
+                // Aquí puedes actualizar tu base de datos para marcar infracciones como pagadas
+            }
+        }
+
+        res.status(200).send("OK");
+    } catch (error) {
+        console.error("Error en webhook MP:", error);
+        res.status(500).send("Error");
     }
 });
 
