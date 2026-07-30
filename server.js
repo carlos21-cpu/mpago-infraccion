@@ -2,16 +2,16 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import Mercadopago from "mercadopago";
+import MercadoPago from "mercadopago";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Inicializar SDK de Mercado Pago
-const mp = new Mercadopago({
-    access_token: process.env.MP_ACCESS_TOKEN,
+// Inicializar SDK de Mercado Pago (versión 3.x)
+const mp = new MercadoPago({
+    accessToken: process.env.MP_ACCESS_TOKEN,
 });
 
 // CORS: por ahora abierto para pruebas; luego limita a tu dominio de frontend
@@ -67,7 +67,7 @@ app.post("/api/clip/create-checkout", async(req, res) => {
             });
         }
 
-        // Cuerpo que envías a Clip; ajusta los campos según tu doc oficial de v2/checkout
+        // Cuerpo que envías a Clip
         const body = {
             amount: Number(amount),
             currency: "MXN",
@@ -103,7 +103,6 @@ app.post("/api/clip/create-checkout", async(req, res) => {
         const clipData = await clipRes.json();
         console.log("Respuesta Clip JSON:", clipData);
 
-        // Ajusta estos nombres según lo que diga la doc de Clip para v2/checkout
         const checkoutUrl =
             clipData.checkout_url ||
             clipData.payment_request_url ||
@@ -186,7 +185,6 @@ app.post("/api/mercadopago/webhook", async(req, res) => {
 
             if (payment.body.status === "approved") {
                 console.log("Pago aprobado en MP:", payment.body.external_reference);
-                // Aquí puedes actualizar tu base de datos para marcar infracciones como pagadas
             }
         }
 
