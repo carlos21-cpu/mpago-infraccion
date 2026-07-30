@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import MercadoPago from "mercadopago";
+import { MercadoPagoConfig, Preference } from "mercadopago";
 
 dotenv.config();
 
@@ -10,9 +10,12 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Inicializar SDK de Mercado Pago (versión 3.x)
-const mp = new MercadoPago({
+const client = new MercadoPagoConfig({
     accessToken: process.env.MP_ACCESS_TOKEN,
+    options: { timeout: 5000 },
 });
+
+const preference = new Preference(client);
 
 // CORS: por ahora abierto para pruebas; luego limita a tu dominio de frontend
 app.use(
@@ -141,7 +144,7 @@ app.post("/api/mercadopago/create-preference", async(req, res) => {
             });
         }
 
-        const preference = {
+        const body = {
             items: [{
                 title: description || `Pago de infracciones - Placa ${placa}`,
                 unit_price: Number(amount),
@@ -158,12 +161,12 @@ app.post("/api/mercadopago/create-preference", async(req, res) => {
             notification_url: `${process.env.BACKEND_URL}/api/mercadopago/webhook`,
         };
 
-        const response = await mp.preferences.create(preference);
+        const result = await preference.create({ body });
 
         return res.json({
             success: true,
-            checkout_url: response.body.init_point,
-            preference_id: response.body.id,
+            checkout_url: result.init_point,
+            preference_id: result.id,
         });
     } catch (error) {
         console.error("Error creando preferencia MP:", error);
@@ -181,11 +184,8 @@ app.post("/api/mercadopago/webhook", async(req, res) => {
 
         if (action === "payment.created" || action === "payment.updated") {
             const paymentId = data.id;
-            const payment = await mp.payments.get(paymentId);
-
-            if (payment.body.status === "approved") {
-                console.log("Pago aprobado en MP:", payment.body.external_reference);
-            }
+            // Aquí puedes consultar el estado del pago si necesitas actualizar tu DB
+            console.log("Notificación de pago en MP:", paymentId);
         }
 
         res.status(200).send("OK");
